@@ -1,0 +1,11 @@
+{
+  "columns": 4,
+  "icon_size": 64,
+  "background_color": "#000000",
+  "text_color": "#FFFFFF",
+  "accent_color": "#7C5CFF",
+  "show_labels": true,
+  "show_clock": true,
+  "sort_by": "name",
+  "hidden_apps": []
+}
