@@ -6,7 +6,9 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,json,xml
 version = 1.0.0
 
-requirements = python3,kivy==2.3.0,pyjnius
+requirements = python3==3.14.2,hostpython3==3.14.2,kivy==2.3.1,pyjnius
+
+p4a.branch = v2026.05.09
 
 orientation = portrait
 fullscreen = 0
@@ -15,9 +17,9 @@ fullscreen = 0
 android.manifest.intent_filters = intent_filters.xml
 
 android.permissions = INTERNET
-android.api = 33
+android.api = 36
 android.minapi = 24
-android.ndk = 25b
+android.ndk = 28c
 android.accept_sdk_license = True
 android.archs = arm64-v8a, armeabi-v7a
 
