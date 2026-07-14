@@ -40,8 +40,8 @@ DEFAULT_CONFIG = {
     "accent_color": "#7C5CFF",
     "show_labels": True,
     "show_clock": True,
-    "sort_by": "name",       # name | recent
-    "hidden_apps": []         # list of package names to hide
+    "sort_by": "name",
+    "hidden_apps": []
 }
 
 
@@ -81,7 +81,6 @@ def save_config(cfg):
 def get_installed_apps():
     """Return [{'label':..., 'package':..., 'class':...}] of launchable apps."""
     if not ANDROID:
-        # Desktop preview / testing fallback
         return [
             {"label": f"Demo App {i}", "package": f"com.demo.app{i}", "class": ""}
             for i in range(1, 13)
@@ -94,6 +93,8 @@ def get_installed_apps():
     intent.addCategory(Intent.CATEGORY_LAUNCHER)
     resolve_infos = pm.queryIntentActivities(intent, 0)
     apps = []
+    if resolve_infos is None:
+        return apps
     for i in range(resolve_infos.size()):
         ri = resolve_infos.get(i)
         try:
@@ -213,7 +214,6 @@ class SettingsScreen(Screen, BackgroundMixin):
                        font_size="20sp", color=hex_to_rgba(self.cfg["text_color"]))
         self.layout.add_widget(title)
 
-        # Columns
         row1 = BoxLayout(size_hint=(1, None), height=dp(44))
         row1.add_widget(Label(text=f"Columns: {self.cfg['columns']}", color=hex_to_rgba(self.cfg["text_color"])))
         col_slider = Slider(min=2, max=6, value=self.cfg["columns"], step=1)
@@ -221,7 +221,6 @@ class SettingsScreen(Screen, BackgroundMixin):
         row1.add_widget(col_slider)
         self.layout.add_widget(row1)
 
-        # Icon size
         row2 = BoxLayout(size_hint=(1, None), height=dp(44))
         row2.add_widget(Label(text=f"Icon size: {self.cfg['icon_size']}", color=hex_to_rgba(self.cfg["text_color"])))
         size_slider = Slider(min=48, max=120, value=self.cfg["icon_size"], step=4)
@@ -229,7 +228,6 @@ class SettingsScreen(Screen, BackgroundMixin):
         row2.add_widget(size_slider)
         self.layout.add_widget(row2)
 
-        # Colors
         for key, label in [("background_color", "Background hex"),
                             ("text_color", "Text hex"),
                             ("accent_color", "Accent hex")]:
@@ -240,7 +238,6 @@ class SettingsScreen(Screen, BackgroundMixin):
             row.add_widget(ti)
             self.layout.add_widget(row)
 
-        # Labels toggle
         row3 = BoxLayout(size_hint=(1, None), height=dp(44))
         row3.add_widget(Label(text="Show labels", color=hex_to_rgba(self.cfg["text_color"])))
         sw1 = Switch(active=self.cfg["show_labels"])
@@ -248,7 +245,6 @@ class SettingsScreen(Screen, BackgroundMixin):
         row3.add_widget(sw1)
         self.layout.add_widget(row3)
 
-        # Clock toggle
         row4 = BoxLayout(size_hint=(1, None), height=dp(44))
         row4.add_widget(Label(text="Show clock", color=hex_to_rgba(self.cfg["text_color"])))
         sw2 = Switch(active=self.cfg["show_clock"])
@@ -272,10 +268,28 @@ class SettingsScreen(Screen, BackgroundMixin):
 class PyLauncherApp(App):
     def build(self):
         Window.softinput_mode = "below_target"
-        sm = ScreenManager()
-        sm.add_widget(HomeScreen(name="home"))
-        sm.add_widget(SettingsScreen(name="settings"))
-        return sm
+        try:
+            sm = ScreenManager()
+            sm.add_widget(HomeScreen(name="home"))
+            sm.add_widget(SettingsScreen(name="settings"))
+            return sm
+        except Exception:
+            import traceback
+            err_text = traceback.format_exc()
+            root = BoxLayout(orientation="vertical", padding=dp(16))
+            scroll = ScrollView()
+            lbl = Label(
+                text="Startup error — screenshot this:\n\n" + err_text,
+                color=(1, 1, 1, 1),
+                size_hint_y=None,
+                halign="left",
+                valign="top",
+            )
+            lbl.bind(width=lambda inst, w: setattr(lbl, "text_size", (w, None)))
+            lbl.bind(texture_size=lambda inst, ts: setattr(lbl, "height", ts[1]))
+            scroll.add_widget(lbl)
+            root.add_widget(scroll)
+            return root
 
 
 if __name__ == "__main__":
