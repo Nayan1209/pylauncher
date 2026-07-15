@@ -125,16 +125,22 @@ def launch_app(package_name, class_name):
 
 
 class BackgroundMixin:
+    _bg_color_instruction = None
+    _bg_rect_instruction = None
+
     def set_bg(self, hex_color):
-        self.canvas.before.clear()
-        with self.canvas.before:
-            Color(*hex_to_rgba(hex_color))
-            self._rect = Rectangle(pos=self.pos, size=self.size)
-        self.bind(pos=self._update_rect, size=self._update_rect)
+        if self._bg_color_instruction is None:
+            with self.canvas.before:
+                self._bg_color_instruction = Color(*hex_to_rgba(hex_color))
+                self._bg_rect_instruction = Rectangle(pos=self.pos, size=self.size)
+            self.bind(pos=self._update_rect, size=self._update_rect)
+        else:
+            self._bg_color_instruction.rgba = hex_to_rgba(hex_color)
 
     def _update_rect(self, *args):
-        self._rect.pos = self.pos
-        self._rect.size = self.size
+        if self._bg_rect_instruction:
+            self._bg_rect_instruction.pos = self.pos
+            self._bg_rect_instruction.size = self.size
 
 
 class HomeScreen(Screen, BackgroundMixin):
@@ -143,7 +149,6 @@ class HomeScreen(Screen, BackgroundMixin):
         self.cfg = load_config()
         self.root_layout = BoxLayout(orientation="vertical")
         self.add_widget(self.root_layout)
-        self.set_bg(self.cfg["background_color"])
         self.clock_label = Label(size_hint=(1, None), height=dp(60), font_size="24sp")
         self.root_layout.add_widget(self.clock_label)
 
