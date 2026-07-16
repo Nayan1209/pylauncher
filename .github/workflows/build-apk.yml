@@ -9,14 +9,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build APK using official Kivy Buildozer Docker image
         run: |
           docker run --rm -v ${{ github.workspace }}:/home/user/hostcwd kivy/buildozer:latest android debug
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: PyLauncher-apk
           path: bin/*.apk
