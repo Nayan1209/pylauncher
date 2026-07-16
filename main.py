@@ -10,20 +10,16 @@ in-app Settings screen — no rebuild required for those changes.
 import json
 import os
 from datetime import datetime
-from io import BytesIO
 
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.core.image import Image as CoreImage
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.image import Image
 from kivy.uix.button import Button
 from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
 from kivy.uix.switch import Switch
 from kivy.uix.slider import Slider
 from kivy.uix.behaviors import ButtonBehavior
@@ -37,17 +33,36 @@ except Exception:
     ANDROID = False
 
 DEFAULT_CONFIG = {
-    "columns": 4,
-    "icon_size": 64,
+    "columns": 1,
+    "app_text_size": 24,
+    "text_align": "left",
     "background_color": "#000000",
     "text_color": "#FFFFFF",
     "accent_color": "#7C5CFF",
     "app_name_color": "#FFFFFF",
-    "show_labels": True,
     "show_clock": True,
     "sort_by": "name",       # name | recent
     "hidden_apps": []         # list of package names to hide
 }
+
+COLOR_PALETTE = [
+    ("Black", "#000000"),
+    ("White", "#FFFFFF"),
+    ("Dark Gray", "#1C1C1E"),
+    ("Light Gray", "#D1D1D6"),
+    ("Navy", "#0A1F44"),
+    ("Indigo", "#4B3F72"),
+    ("Purple", "#7C5CFF"),
+    ("Teal", "#2EC4B6"),
+    ("Forest", "#1B5E20"),
+    ("Olive", "#6B7A3D"),
+    ("Crimson", "#D7263D"),
+    ("Orange", "#FF7A00"),
+    ("Amber", "#FFC300"),
+    ("Pink", "#FF6F91"),
+    ("Brown", "#5C4033"),
+    ("Sky", "#3AA6FF"),
+]
 
 
 def hex_to_rgba(h, a=1.0):
@@ -130,49 +145,6 @@ def launch_app(package_name, class_name):
     activity.startActivity(intent)
 
 
-_icon_cache = {}
-
-
-def get_app_icon_texture(package_name):
-    """Fetch and cache a real app icon as a Kivy texture. Returns None on any
-    failure so a single broken icon can never take down the whole grid."""
-    if package_name in _icon_cache:
-        return _icon_cache[package_name]
-    if not ANDROID:
-        _icon_cache[package_name] = None
-        return None
-    try:
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        Bitmap = autoclass("android.graphics.Bitmap")
-        BitmapConfig = autoclass("android.graphics.Bitmap$Config")
-        Canvas = autoclass("android.graphics.Canvas")
-        ByteArrayOutputStream = autoclass("java.io.ByteArrayOutputStream")
-        CompressFormat = autoclass("android.graphics.Bitmap$CompressFormat")
-
-        activity = PythonActivity.mActivity
-        pm = activity.getPackageManager()
-        drawable = pm.getApplicationIcon(package_name)
-
-        w = max(drawable.getIntrinsicWidth(), 1)
-        h = max(drawable.getIntrinsicHeight(), 1)
-        bitmap = Bitmap.createBitmap(w, h, BitmapConfig.ARGB_8888)
-        canvas = Canvas(bitmap)
-        drawable.setBounds(0, 0, w, h)
-        drawable.draw(canvas)
-
-        stream = ByteArrayOutputStream()
-        bitmap.compress(CompressFormat.PNG, 100, stream)
-        png_bytes = bytes(stream.toByteArray())
-
-        core_img = CoreImage(BytesIO(png_bytes), ext="png")
-        texture = core_img.texture
-        _icon_cache[package_name] = texture
-        return texture
-    except Exception:
-        _icon_cache[package_name] = None
-        return None
-
-
 class BackgroundMixin:
     _bg_color_instruction = None
     _bg_rect_instruction = None
@@ -192,37 +164,23 @@ class BackgroundMixin:
             self._bg_rect_instruction.size = self.size
 
 
-class AppTile(ButtonBehavior, BoxLayout):
-    """One app icon + name in the grid. Name font size scales with icon
-    height, so bumping the icon-size slider grows both together."""
+class AppRow(ButtonBehavior, BoxLayout):
+    """One app name in the list — text only, tappable to launch."""
 
     def __init__(self, app, cfg, **kwargs):
-        super().__init__(orientation="vertical", spacing=dp(4), **kwargs)
+        super().__init__(**kwargs)
         self.app = app
-
-        icon_h = dp(cfg["icon_size"])
-        img = Image(size_hint=(1, None), height=icon_h, allow_stretch=True, keep_ratio=True)
-        texture = get_app_icon_texture(app["package"])
-        if texture:
-            img.texture = texture
-        self.add_widget(img)
-
-        if cfg.get("show_labels", True):
-            font_size = max(10, cfg["icon_size"] * 0.2)
-            lbl = Label(
-                text=app["label"],
-                size_hint=(1, None),
-                height=dp(20),
-                font_size=f"{font_size}sp",
-                color=hex_to_rgba(cfg.get("app_name_color", cfg["text_color"])),
-                halign="center",
-                valign="middle",
-                shorten=True,
-                shorten_from="right",
-            )
-            lbl.bind(size=lambda inst, s: setattr(lbl, "text_size", s))
-            self.add_widget(lbl)
-
+        lbl = Label(
+            text=app["label"],
+            font_size=f"{cfg.get('app_text_size', 24)}sp",
+            color=hex_to_rgba(cfg.get("app_name_color", cfg["text_color"])),
+            halign=cfg.get("text_align", "left"),
+            valign="middle",
+            shorten=True,
+            shorten_from="right",
+        )
+        lbl.bind(size=lambda inst, s: setattr(lbl, "text_size", s))
+        self.add_widget(lbl)
         self.bind(on_release=self._launch)
 
     def _launch(self, *_):
@@ -239,8 +197,8 @@ class HomeScreen(Screen, BackgroundMixin):
         self.root_layout.add_widget(self.clock_label)
 
         scroll = ScrollView()
-        self.grid = GridLayout(cols=self.cfg["columns"], spacing=dp(12),
-                                padding=dp(16), size_hint_y=None)
+        self.grid = GridLayout(cols=self.cfg["columns"], spacing=dp(18),
+                                padding=[dp(24), dp(16)], size_hint_y=None)
         self.grid.bind(minimum_height=self.grid.setter("height"))
         scroll.add_widget(self.grid)
         self.root_layout.add_widget(scroll)
@@ -273,10 +231,10 @@ class HomeScreen(Screen, BackgroundMixin):
         if self.cfg.get("sort_by") == "name":
             apps.sort(key=lambda a: a["label"].lower())
 
+        row_height = dp(self.cfg.get("app_text_size", 24) + 30)
         for app in apps:
-            tile_height = dp(self.cfg["icon_size"] + (24 if self.cfg["show_labels"] else 4))
-            tile = AppTile(app, self.cfg, size_hint_y=None, height=tile_height)
-            self.grid.add_widget(tile)
+            row = AppRow(app, self.cfg, size_hint_y=None, height=row_height)
+            self.grid.add_widget(row)
 
     def on_pre_enter(self):
         self.refresh()
@@ -286,8 +244,12 @@ class SettingsScreen(Screen, BackgroundMixin):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.cfg = load_config()
-        self.layout = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(10))
-        self.add_widget(self.layout)
+        self.scroll = ScrollView()
+        self.add_widget(self.scroll)
+        self.layout = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(18),
+                                 size_hint_y=None)
+        self.layout.bind(minimum_height=self.layout.setter("height"))
+        self.scroll.add_widget(self.layout)
         self.set_bg(self.cfg["background_color"])
         self.build_ui()
 
@@ -298,40 +260,47 @@ class SettingsScreen(Screen, BackgroundMixin):
         self.layout.add_widget(title)
 
         # Columns
-        row1 = BoxLayout(size_hint=(1, None), height=dp(44))
-        row1.add_widget(Label(text=f"Columns: {self.cfg['columns']}", color=hex_to_rgba(self.cfg["text_color"])))
-        col_slider = Slider(min=2, max=6, value=self.cfg["columns"], step=1)
+        row1 = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(60), spacing=dp(4))
+        row1.add_widget(Label(text=f"Columns: {self.cfg['columns']}", size_hint=(1, None), height=dp(24),
+                               color=hex_to_rgba(self.cfg["text_color"])))
+        col_slider = Slider(min=1, max=4, value=self.cfg["columns"], step=1, size_hint=(1, None), height=dp(30))
         col_slider.bind(value=lambda inst, v: self.update_field("columns", int(v)))
         row1.add_widget(col_slider)
         self.layout.add_widget(row1)
 
-        # Icon size
-        row2 = BoxLayout(size_hint=(1, None), height=dp(44))
-        row2.add_widget(Label(text=f"Icon size: {self.cfg['icon_size']}", color=hex_to_rgba(self.cfg["text_color"])))
-        size_slider = Slider(min=48, max=120, value=self.cfg["icon_size"], step=4)
-        size_slider.bind(value=lambda inst, v: self.update_field("icon_size", int(v)))
+        # Text size
+        row2 = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(60), spacing=dp(4))
+        row2.add_widget(Label(text=f"Text size: {self.cfg['app_text_size']}", size_hint=(1, None), height=dp(24),
+                               color=hex_to_rgba(self.cfg["text_color"])))
+        size_slider = Slider(min=16, max=40, value=self.cfg["app_text_size"], step=1,
+                              size_hint=(1, None), height=dp(30))
+        size_slider.bind(value=lambda inst, v: self.update_field("app_text_size", int(v)))
         row2.add_widget(size_slider)
         self.layout.add_widget(row2)
 
-        # Colors
-        for key, label in [("background_color", "Background hex"),
-                            ("text_color", "Text hex"),
-                            ("accent_color", "Accent hex"),
-                            ("app_name_color", "App name hex")]:
-            row = BoxLayout(size_hint=(1, None), height=dp(44))
-            row.add_widget(Label(text=label, color=hex_to_rgba(self.cfg["text_color"]), size_hint=(0.4, 1)))
-            ti = TextInput(text=self.cfg[key], multiline=False)
-            ti.bind(text=lambda inst, v, k=key: self.update_field(k, v))
-            row.add_widget(ti)
-            self.layout.add_widget(row)
+        # Text alignment — visual picker, no typing
+        align_wrap = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(64), spacing=dp(6))
+        align_wrap.add_widget(Label(text="Text alignment", size_hint=(1, None), height=dp(20),
+                                     color=hex_to_rgba(self.cfg["text_color"])))
+        align_row = BoxLayout(size_hint=(1, None), height=dp(38), spacing=dp(8))
+        for value, label in [("left", "Left"), ("center", "Center"), ("right", "Right")]:
+            selected = self.cfg.get("text_align", "left") == value
+            btn = Button(
+                text=label,
+                background_normal="",
+                background_color=hex_to_rgba(self.cfg["accent_color"], 1.0 if selected else 0.25),
+            )
+            btn.bind(on_release=lambda inst, v=value: self.set_align(v))
+            align_row.add_widget(btn)
+        align_wrap.add_widget(align_row)
+        self.layout.add_widget(align_wrap)
 
-        # Labels toggle
-        row3 = BoxLayout(size_hint=(1, None), height=dp(44))
-        row3.add_widget(Label(text="Show labels", color=hex_to_rgba(self.cfg["text_color"])))
-        sw1 = Switch(active=self.cfg["show_labels"])
-        sw1.bind(active=lambda inst, v: self.update_field("show_labels", v))
-        row3.add_widget(sw1)
-        self.layout.add_widget(row3)
+        # Colors — visual swatches, no hex typing
+        for key, label in [("background_color", "Background color"),
+                            ("text_color", "Text color"),
+                            ("accent_color", "Accent color"),
+                            ("app_name_color", "App name color")]:
+            self.layout.add_widget(self._build_color_row(label, key))
 
         # Clock toggle
         row4 = BoxLayout(size_hint=(1, None), height=dp(44))
@@ -345,6 +314,37 @@ class SettingsScreen(Screen, BackgroundMixin):
                            background_color=hex_to_rgba(self.cfg["accent_color"]))
         save_btn.bind(on_release=lambda *_: self.save_and_return())
         self.layout.add_widget(save_btn)
+
+    def _build_color_row(self, label_text, cfg_key):
+        container = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(84), spacing=dp(6))
+
+        header = BoxLayout(size_hint=(1, None), height=dp(24))
+        header.add_widget(Label(text=label_text, color=hex_to_rgba(self.cfg["text_color"]),
+                                 halign="left", size_hint=(0.75, 1)))
+        preview = Button(background_normal="", background_color=hex_to_rgba(self.cfg[cfg_key]),
+                          size_hint=(0.25, 1), disabled=True)
+        header.add_widget(preview)
+        container.add_widget(header)
+
+        scroll = ScrollView(size_hint=(1, None), height=dp(44), do_scroll_y=False)
+        swatch_row = BoxLayout(size_hint=(None, 1), spacing=dp(8))
+        swatch_row.bind(minimum_width=swatch_row.setter("width"))
+        for _, hexval in COLOR_PALETTE:
+            sw = Button(size_hint=(None, 1), width=dp(40), background_normal="",
+                        background_color=hex_to_rgba(hexval))
+            sw.bind(on_release=lambda inst, k=cfg_key, h=hexval, p=preview: self._set_color(k, h, p))
+            swatch_row.add_widget(sw)
+        scroll.add_widget(swatch_row)
+        container.add_widget(scroll)
+        return container
+
+    def _set_color(self, key, hexval, preview_widget):
+        self.cfg[key] = hexval
+        preview_widget.background_color = hex_to_rgba(hexval)
+
+    def set_align(self, value):
+        self.cfg["text_align"] = value
+        self.build_ui()
 
     def update_field(self, key, value):
         self.cfg[key] = value
