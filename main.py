@@ -10,19 +10,23 @@ in-app Settings screen — no rebuild required for those changes.
 import json
 import os
 from datetime import datetime
+from io import BytesIO
 
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
+from kivy.core.image import Image as CoreImage
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.image import Image
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.switch import Switch
 from kivy.uix.slider import Slider
+from kivy.uix.behaviors import ButtonBehavior
 from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 
@@ -38,10 +42,11 @@ DEFAULT_CONFIG = {
     "background_color": "#000000",
     "text_color": "#FFFFFF",
     "accent_color": "#7C5CFF",
+    "app_name_color": "#FFFFFF",
     "show_labels": True,
     "show_clock": True,
-    "sort_by": "name",
-    "hidden_apps": []
+    "sort_by": "name",       # name | recent
+    "hidden_apps": []         # list of package names to hide
 }
 
 
@@ -81,6 +86,7 @@ def save_config(cfg):
 def get_installed_apps():
     """Return [{'label':..., 'package':..., 'class':...}] of launchable apps."""
     if not ANDROID:
+        # Desktop preview / testing fallback
         return [
             {"label": f"Demo App {i}", "package": f"com.demo.app{i}", "class": ""}
             for i in range(1, 13)
@@ -124,6 +130,49 @@ def launch_app(package_name, class_name):
     activity.startActivity(intent)
 
 
+_icon_cache = {}
+
+
+def get_app_icon_texture(package_name):
+    """Fetch and cache a real app icon as a Kivy texture. Returns None on any
+    failure so a single broken icon can never take down the whole grid."""
+    if package_name in _icon_cache:
+        return _icon_cache[package_name]
+    if not ANDROID:
+        _icon_cache[package_name] = None
+        return None
+    try:
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        Bitmap = autoclass("android.graphics.Bitmap")
+        BitmapConfig = autoclass("android.graphics.Bitmap$Config")
+        Canvas = autoclass("android.graphics.Canvas")
+        ByteArrayOutputStream = autoclass("java.io.ByteArrayOutputStream")
+        CompressFormat = autoclass("android.graphics.Bitmap$CompressFormat")
+
+        activity = PythonActivity.mActivity
+        pm = activity.getPackageManager()
+        drawable = pm.getApplicationIcon(package_name)
+
+        w = max(drawable.getIntrinsicWidth(), 1)
+        h = max(drawable.getIntrinsicHeight(), 1)
+        bitmap = Bitmap.createBitmap(w, h, BitmapConfig.ARGB_8888)
+        canvas = Canvas(bitmap)
+        drawable.setBounds(0, 0, w, h)
+        drawable.draw(canvas)
+
+        stream = ByteArrayOutputStream()
+        bitmap.compress(CompressFormat.PNG, 100, stream)
+        png_bytes = bytes(stream.toByteArray())
+
+        core_img = CoreImage(BytesIO(png_bytes), ext="png")
+        texture = core_img.texture
+        _icon_cache[package_name] = texture
+        return texture
+    except Exception:
+        _icon_cache[package_name] = None
+        return None
+
+
 class BackgroundMixin:
     _bg_color_instruction = None
     _bg_rect_instruction = None
@@ -141,6 +190,43 @@ class BackgroundMixin:
         if self._bg_rect_instruction:
             self._bg_rect_instruction.pos = self.pos
             self._bg_rect_instruction.size = self.size
+
+
+class AppTile(ButtonBehavior, BoxLayout):
+    """One app icon + name in the grid. Name font size scales with icon
+    height, so bumping the icon-size slider grows both together."""
+
+    def __init__(self, app, cfg, **kwargs):
+        super().__init__(orientation="vertical", spacing=dp(4), **kwargs)
+        self.app = app
+
+        icon_h = dp(cfg["icon_size"])
+        img = Image(size_hint=(1, None), height=icon_h, allow_stretch=True, keep_ratio=True)
+        texture = get_app_icon_texture(app["package"])
+        if texture:
+            img.texture = texture
+        self.add_widget(img)
+
+        if cfg.get("show_labels", True):
+            font_size = max(10, cfg["icon_size"] * 0.2)
+            lbl = Label(
+                text=app["label"],
+                size_hint=(1, None),
+                height=dp(20),
+                font_size=f"{font_size}sp",
+                color=hex_to_rgba(cfg.get("app_name_color", cfg["text_color"])),
+                halign="center",
+                valign="middle",
+                shorten=True,
+                shorten_from="right",
+            )
+            lbl.bind(size=lambda inst, s: setattr(lbl, "text_size", s))
+            self.add_widget(lbl)
+
+        self.bind(on_release=self._launch)
+
+    def _launch(self, *_):
+        launch_app(self.app["package"], self.app["class"])
 
 
 class HomeScreen(Screen, BackgroundMixin):
@@ -188,17 +274,9 @@ class HomeScreen(Screen, BackgroundMixin):
             apps.sort(key=lambda a: a["label"].lower())
 
         for app in apps:
-            btn = Button(
-                text=app["label"] if self.cfg["show_labels"] else "",
-                size_hint_y=None,
-                height=dp(self.cfg["icon_size"] + 20),
-                background_normal="",
-                background_color=hex_to_rgba(self.cfg["accent_color"], 0.15),
-                color=hex_to_rgba(self.cfg["text_color"]),
-                font_size="13sp",
-            )
-            btn.bind(on_release=lambda inst, a=app: launch_app(a["package"], a["class"]))
-            self.grid.add_widget(btn)
+            tile_height = dp(self.cfg["icon_size"] + (24 if self.cfg["show_labels"] else 4))
+            tile = AppTile(app, self.cfg, size_hint_y=None, height=tile_height)
+            self.grid.add_widget(tile)
 
     def on_pre_enter(self):
         self.refresh()
@@ -219,6 +297,7 @@ class SettingsScreen(Screen, BackgroundMixin):
                        font_size="20sp", color=hex_to_rgba(self.cfg["text_color"]))
         self.layout.add_widget(title)
 
+        # Columns
         row1 = BoxLayout(size_hint=(1, None), height=dp(44))
         row1.add_widget(Label(text=f"Columns: {self.cfg['columns']}", color=hex_to_rgba(self.cfg["text_color"])))
         col_slider = Slider(min=2, max=6, value=self.cfg["columns"], step=1)
@@ -226,6 +305,7 @@ class SettingsScreen(Screen, BackgroundMixin):
         row1.add_widget(col_slider)
         self.layout.add_widget(row1)
 
+        # Icon size
         row2 = BoxLayout(size_hint=(1, None), height=dp(44))
         row2.add_widget(Label(text=f"Icon size: {self.cfg['icon_size']}", color=hex_to_rgba(self.cfg["text_color"])))
         size_slider = Slider(min=48, max=120, value=self.cfg["icon_size"], step=4)
@@ -233,9 +313,11 @@ class SettingsScreen(Screen, BackgroundMixin):
         row2.add_widget(size_slider)
         self.layout.add_widget(row2)
 
+        # Colors
         for key, label in [("background_color", "Background hex"),
                             ("text_color", "Text hex"),
-                            ("accent_color", "Accent hex")]:
+                            ("accent_color", "Accent hex"),
+                            ("app_name_color", "App name hex")]:
             row = BoxLayout(size_hint=(1, None), height=dp(44))
             row.add_widget(Label(text=label, color=hex_to_rgba(self.cfg["text_color"]), size_hint=(0.4, 1)))
             ti = TextInput(text=self.cfg[key], multiline=False)
@@ -243,6 +325,7 @@ class SettingsScreen(Screen, BackgroundMixin):
             row.add_widget(ti)
             self.layout.add_widget(row)
 
+        # Labels toggle
         row3 = BoxLayout(size_hint=(1, None), height=dp(44))
         row3.add_widget(Label(text="Show labels", color=hex_to_rgba(self.cfg["text_color"])))
         sw1 = Switch(active=self.cfg["show_labels"])
@@ -250,6 +333,7 @@ class SettingsScreen(Screen, BackgroundMixin):
         row3.add_widget(sw1)
         self.layout.add_widget(row3)
 
+        # Clock toggle
         row4 = BoxLayout(size_hint=(1, None), height=dp(44))
         row4.add_widget(Label(text="Show clock", color=hex_to_rgba(self.cfg["text_color"])))
         sw2 = Switch(active=self.cfg["show_clock"])
