@@ -18,6 +18,7 @@ from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.widget import Widget
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.switch import Switch
@@ -98,6 +99,29 @@ def save_config(cfg):
         json.dump(cfg, f, indent=2)
 
 
+def _resolve_label(ri, pm):
+    """Try several ways to get a proper app name — .toString() on the
+    CharSequence loadLabel() returns can fail via pyjnius, so try str()
+    and an alternate API before giving up and using the package name."""
+    try:
+        label_obj = ri.loadLabel(pm)
+        if label_obj is not None:
+            text = str(label_obj)
+            if text:
+                return text
+    except Exception:
+        pass
+    try:
+        label_obj = pm.getApplicationLabel(ri.activityInfo.applicationInfo)
+        if label_obj is not None:
+            text = str(label_obj)
+            if text:
+                return text
+    except Exception:
+        pass
+    return ri.activityInfo.packageName
+
+
 def get_installed_apps():
     """Return [{'label':..., 'package':..., 'class':...}] of launchable apps."""
     if not ANDROID:
@@ -118,12 +142,8 @@ def get_installed_apps():
         return apps
     for i in range(resolve_infos.size()):
         ri = resolve_infos.get(i)
-        try:
-            label = ri.loadLabel(pm).toString()
-        except Exception:
-            label = ri.activityInfo.packageName
         apps.append({
-            "label": label,
+            "label": _resolve_label(ri, pm),
             "package": ri.activityInfo.packageName,
             "class": ri.activityInfo.name,
         })
@@ -188,13 +208,78 @@ class AppRow(ButtonBehavior, BoxLayout):
 
 
 class HomeScreen(Screen, BackgroundMixin):
+    """Minimal home screen: just the clock. Swipe up to see your apps."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cfg = load_config()
+        layout = BoxLayout(orientation="vertical")
+        self.add_widget(layout)
+
+        layout.add_widget(Widget(size_hint_y=0.35))
+
+        self.time_label = Label(font_size="52sp", size_hint=(1, None), height=dp(70))
+        layout.add_widget(self.time_label)
+
+        self.date_label = Label(font_size="18sp", size_hint=(1, None), height=dp(30))
+        layout.add_widget(self.date_label)
+
+        self.hint_label = Label(text="↑  swipe up for apps", font_size="14sp",
+                                 size_hint=(1, None), height=dp(30), opacity=0.5)
+        layout.add_widget(self.hint_label)
+
+        layout.add_widget(Widget())
+
+        Clock.schedule_interval(self.update_clock, 1)
+
+    def update_clock(self, *_):
+        self.cfg = load_config()
+        self.set_bg(self.cfg["background_color"])
+        if self.cfg.get("show_clock", True):
+            self.time_label.text = datetime.now().strftime("%H:%M")
+            self.date_label.text = datetime.now().strftime("%A, %d %B")
+            self.time_label.opacity = 1
+            self.date_label.opacity = 1
+        else:
+            self.time_label.opacity = 0
+            self.date_label.opacity = 0
+        text_color = hex_to_rgba(self.cfg["text_color"])
+        self.time_label.color = text_color
+        self.date_label.color = text_color
+        self.hint_label.color = hex_to_rgba(self.cfg["text_color"], 0.5)
+
+    def on_pre_enter(self):
+        self.update_clock()
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            touch.ud["start_y"] = touch.y
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        if "start_y" in touch.ud:
+            if touch.y - touch.ud["start_y"] < -dp(60):
+                self.manager.current = "apps"
+        return super().on_touch_up(touch)
+
+
+class AppsScreen(Screen, BackgroundMixin):
+    """Full app list — reached by swiping up from Home."""
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.cfg = load_config()
         self.root_layout = BoxLayout(orientation="vertical")
         self.add_widget(self.root_layout)
-        self.clock_label = Label(size_hint=(1, None), height=dp(60), font_size="24sp")
-        self.root_layout.add_widget(self.clock_label)
+
+        top_bar = BoxLayout(size_hint=(1, None), height=dp(48), spacing=dp(8), padding=[dp(8), 0])
+        home_btn = Button(text="⌂ Home", background_color=hex_to_rgba(self.cfg["accent_color"]))
+        home_btn.bind(on_release=lambda *_: self.manager.__setattr__("current", "home"))
+        settings_btn = Button(text="⚙ Settings", background_color=hex_to_rgba(self.cfg["accent_color"]))
+        settings_btn.bind(on_release=lambda *_: self.manager.__setattr__("current", "settings"))
+        top_bar.add_widget(home_btn)
+        top_bar.add_widget(settings_btn)
+        self.root_layout.add_widget(top_bar)
 
         scroll = ScrollView()
         self.grid = GridLayout(cols=self.cfg["columns"], spacing=dp(18),
@@ -202,23 +287,6 @@ class HomeScreen(Screen, BackgroundMixin):
         self.grid.bind(minimum_height=self.grid.setter("height"))
         scroll.add_widget(self.grid)
         self.root_layout.add_widget(scroll)
-
-        settings_bar = BoxLayout(size_hint=(1, None), height=dp(48))
-        settings_btn = Button(text="⚙ Settings", background_color=hex_to_rgba(self.cfg["accent_color"]))
-        settings_btn.bind(on_release=lambda *_: self.manager.__setattr__("current", "settings"))
-        settings_bar.add_widget(settings_btn)
-        self.root_layout.add_widget(settings_bar)
-
-        Clock.schedule_interval(self.update_clock, 1)
-        self.refresh()
-
-    def update_clock(self, *_):
-        if self.cfg.get("show_clock", True):
-            self.clock_label.text = datetime.now().strftime("%H:%M   %a %d %b")
-            self.clock_label.color = hex_to_rgba(self.cfg["text_color"])
-            self.clock_label.opacity = 1
-        else:
-            self.clock_label.opacity = 0
 
     def refresh(self):
         self.cfg = load_config()
@@ -351,7 +419,7 @@ class SettingsScreen(Screen, BackgroundMixin):
 
     def save_and_return(self):
         save_config(self.cfg)
-        self.manager.current = "home"
+        self.manager.current = "apps"
 
 
 class PyLauncherApp(App):
@@ -360,6 +428,7 @@ class PyLauncherApp(App):
         try:
             sm = ScreenManager()
             sm.add_widget(HomeScreen(name="home"))
+            sm.add_widget(AppsScreen(name="apps"))
             sm.add_widget(SettingsScreen(name="settings"))
             return sm
         except Exception:
